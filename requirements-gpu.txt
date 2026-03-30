@@ -1,0 +1,2 @@
+-r requirements.txt
+brian2cuda>=1.0

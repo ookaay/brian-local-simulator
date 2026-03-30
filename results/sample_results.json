@@ -1,0 +1,313 @@
+{
+  "generated_at": "2026-03-29T09:45:00+00:00",
+  "simulation": {
+    "model": "CUBA",
+    "reference": "https://brian2.readthedocs.io/en/2.8.0/examples/CUBA.html",
+    "duration_ms": 300,
+    "neuron_counts": [1000, 4000, 8000],
+    "requested_backends": ["numpy", "cpp_standalone", "cuda_standalone"],
+    "requested_scenarios": ["subgroups", "split_groups"],
+    "repeats": 2
+  },
+  "scenarios": [
+    {
+      "name": "subgroups",
+      "label": "Single group with Subgroups",
+      "description": "One NeuronGroup split into excitatory and inhibitory Subgroups."
+    },
+    {
+      "name": "split_groups",
+      "label": "Separate excitatory and inhibitory groups",
+      "description": "Two NeuronGroups replace Subgroups to approximate eventspace partitioning."
+    }
+  ],
+  "environment": {
+    "python": "3.11.0",
+    "backend_support": {
+      "numpy": {
+        "supported": true,
+        "reason": null
+      },
+      "cpp_standalone": {
+        "supported": true,
+        "reason": null
+      },
+      "cuda_standalone": {
+        "supported": false,
+        "reason": "Brian2CUDA is not installed."
+      }
+    }
+  },
+  "results": [
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "numpy",
+      "neuron_count": 1000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 0.694,
+      "min_runtime_seconds": 0.671,
+      "max_runtime_seconds": 0.717,
+      "mean_spike_count": 523.5,
+      "errors": []
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "numpy",
+      "neuron_count": 4000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 2.991,
+      "min_runtime_seconds": 2.91,
+      "max_runtime_seconds": 3.072,
+      "mean_spike_count": 2098.0,
+      "errors": []
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "numpy",
+      "neuron_count": 8000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 6.531,
+      "min_runtime_seconds": 6.412,
+      "max_runtime_seconds": 6.65,
+      "mean_spike_count": 4203.0,
+      "errors": []
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "cpp_standalone",
+      "neuron_count": 1000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 0.481,
+      "min_runtime_seconds": 0.455,
+      "max_runtime_seconds": 0.507,
+      "mean_spike_count": 518.0,
+      "errors": []
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "cpp_standalone",
+      "neuron_count": 4000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 1.486,
+      "min_runtime_seconds": 1.433,
+      "max_runtime_seconds": 1.539,
+      "mean_spike_count": 2087.0,
+      "errors": []
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "cpp_standalone",
+      "neuron_count": 8000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 2.918,
+      "min_runtime_seconds": 2.841,
+      "max_runtime_seconds": 2.995,
+      "mean_spike_count": 4191.0,
+      "errors": []
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "cuda_standalone",
+      "neuron_count": 1000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 0,
+      "mean_runtime_seconds": null,
+      "min_runtime_seconds": null,
+      "max_runtime_seconds": null,
+      "mean_spike_count": null,
+      "errors": [
+        "Brian2CUDA is not installed.",
+        "Brian2CUDA is not installed."
+      ]
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "cuda_standalone",
+      "neuron_count": 4000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 0,
+      "mean_runtime_seconds": null,
+      "min_runtime_seconds": null,
+      "max_runtime_seconds": null,
+      "mean_spike_count": null,
+      "errors": [
+        "Brian2CUDA is not installed.",
+        "Brian2CUDA is not installed."
+      ]
+    },
+    {
+      "scenario": "subgroups",
+      "scenario_label": "Single group with Subgroups",
+      "backend": "cuda_standalone",
+      "neuron_count": 8000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 0,
+      "mean_runtime_seconds": null,
+      "min_runtime_seconds": null,
+      "max_runtime_seconds": null,
+      "mean_spike_count": null,
+      "errors": [
+        "Brian2CUDA is not installed.",
+        "Brian2CUDA is not installed."
+      ]
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "numpy",
+      "neuron_count": 1000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 0.662,
+      "min_runtime_seconds": 0.645,
+      "max_runtime_seconds": 0.679,
+      "mean_spike_count": 521.0,
+      "errors": []
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "numpy",
+      "neuron_count": 4000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 2.744,
+      "min_runtime_seconds": 2.705,
+      "max_runtime_seconds": 2.783,
+      "mean_spike_count": 2089.5,
+      "errors": []
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "numpy",
+      "neuron_count": 8000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 6.109,
+      "min_runtime_seconds": 6.012,
+      "max_runtime_seconds": 6.206,
+      "mean_spike_count": 4188.0,
+      "errors": []
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "cpp_standalone",
+      "neuron_count": 1000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 0.456,
+      "min_runtime_seconds": 0.438,
+      "max_runtime_seconds": 0.474,
+      "mean_spike_count": 516.5,
+      "errors": []
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "cpp_standalone",
+      "neuron_count": 4000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 1.392,
+      "min_runtime_seconds": 1.349,
+      "max_runtime_seconds": 1.435,
+      "mean_spike_count": 2083.0,
+      "errors": []
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "cpp_standalone",
+      "neuron_count": 8000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 2,
+      "mean_runtime_seconds": 2.744,
+      "min_runtime_seconds": 2.713,
+      "max_runtime_seconds": 2.775,
+      "mean_spike_count": 4180.0,
+      "errors": []
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "cuda_standalone",
+      "neuron_count": 1000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 0,
+      "mean_runtime_seconds": null,
+      "min_runtime_seconds": null,
+      "max_runtime_seconds": null,
+      "mean_spike_count": null,
+      "errors": [
+        "Brian2CUDA is not installed.",
+        "Brian2CUDA is not installed."
+      ]
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "cuda_standalone",
+      "neuron_count": 4000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 0,
+      "mean_runtime_seconds": null,
+      "min_runtime_seconds": null,
+      "max_runtime_seconds": null,
+      "mean_spike_count": null,
+      "errors": [
+        "Brian2CUDA is not installed.",
+        "Brian2CUDA is not installed."
+      ]
+    },
+    {
+      "scenario": "split_groups",
+      "scenario_label": "Separate excitatory and inhibitory groups",
+      "backend": "cuda_standalone",
+      "neuron_count": 8000,
+      "duration_ms": 300,
+      "repeats": 2,
+      "successful_runs": 0,
+      "mean_runtime_seconds": null,
+      "min_runtime_seconds": null,
+      "max_runtime_seconds": null,
+      "mean_spike_count": null,
+      "errors": [
+        "Brian2CUDA is not installed.",
+        "Brian2CUDA is not installed."
+      ]
+    }
+  ]
+}

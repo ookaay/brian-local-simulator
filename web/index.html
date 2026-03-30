@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brian Simulation Control Center</title>
+    <link rel="stylesheet" href="./styles.css?v=20260329d" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand-card">
+          <p class="eyebrow">Brian Studio</p>
+          <h1>Simulation Control Center</h1>
+          <p class="intro">
+            Upload a Python script or shape a configurable CUBA template, then run it
+            locally with `numpy`, `cpp_standalone`, or `cuda_standalone`.
+          </p>
+        </div>
+
+        <section class="sidebar-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Run mode</p>
+              <h2>Input source</h2>
+            </div>
+          </div>
+          <div class="mode-toggle" id="mode-toggle">
+            <button class="mode-pill active" data-mode="generate" type="button">CUBA Builder</button>
+            <button class="mode-pill" data-mode="upload" type="button">Upload Script</button>
+          </div>
+        </section>
+
+        <section class="sidebar-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Backend</p>
+              <h2>Execution target</h2>
+            </div>
+          </div>
+          <label class="field-block" for="backend-select">
+            <span class="field-label">Backend selection</span>
+            <select id="backend-select"></select>
+          </label>
+          <div class="status-list" id="backend-support"></div>
+        </section>
+
+        <section class="sidebar-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Run</p>
+              <h2>Launch locally</h2>
+            </div>
+          </div>
+          <button id="run-button" class="run-button" type="button">Run Simulation</button>
+          <p id="run-status" class="run-status">Ready.</p>
+          <div class="note-card" id="request-hint">
+            Generated mode uses a configurable CUBA template with editable code preview.
+          </div>
+        </section>
+
+        <section class="sidebar-panel runtime-stack" id="runtime-status"></section>
+      </aside>
+
+      <main class="main">
+        <section class="hero-row">
+          <div class="hero-copy">
+            <p class="section-kicker">Workspace</p>
+            <h2>Design, inspect, and run the script without leaving one screen.</h2>
+          </div>
+          <div class="hero-meta" id="hero-meta"></div>
+        </section>
+
+        <section class="metrics-grid" id="summary-panel"></section>
+
+        <section class="workspace-grid">
+          <section class="panel builder-panel">
+            <div class="section-head compact">
+              <div>
+                <p class="section-kicker">Builder</p>
+                <h2>CUBA controls</h2>
+              </div>
+              <p class="section-note">Dropdowns and manual input feed the same generated script.</p>
+            </div>
+
+            <div id="generate-panel">
+              <div class="control-groups">
+                <section class="control-card">
+                  <h3>Network</h3>
+                  <div class="form-grid">
+                    <label class="field-block">
+                      <span class="field-label">Neurons</span>
+                      <input id="neurons-input" type="number" min="1" max="50000" value="4000" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Duration (ms)</span>
+                      <input id="duration-input" type="number" min="1" max="10000" value="300" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Excitatory ratio</span>
+                      <input id="excitatory-ratio-input" type="number" min="0.05" max="0.95" step="0.01" value="0.8" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Connection probability</span>
+                      <input id="connection-probability-input" type="number" min="0.0001" max="1" step="0.001" value="0.02" />
+                    </label>
+                  </div>
+                </section>
+
+                <section class="control-card">
+                  <h3>Dynamics</h3>
+                  <div class="form-grid">
+                    <label class="field-block">
+                      <span class="field-label">Integration method</span>
+                      <select id="integration-method-input">
+                        <option value="exact" selected>exact</option>
+                        <option value="euler">euler</option>
+                      </select>
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Monitor population</span>
+                      <select id="monitor-population-input">
+                        <option value="all" selected>all</option>
+                        <option value="excitatory">excitatory</option>
+                        <option value="inhibitory">inhibitory</option>
+                      </select>
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Tau m (ms)</span>
+                      <input id="taum-input" type="number" step="0.1" value="20" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Tau e (ms)</span>
+                      <input id="taue-input" type="number" step="0.1" value="5" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Tau i (ms)</span>
+                      <input id="taui-input" type="number" step="0.1" value="10" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Refractory (ms)</span>
+                      <input id="refractory-input" type="number" step="0.1" value="5" />
+                    </label>
+                  </div>
+                </section>
+
+                <section class="control-card">
+                  <h3>Voltages and weights</h3>
+                  <div class="form-grid">
+                    <label class="field-block">
+                      <span class="field-label">Threshold (mV)</span>
+                      <input id="threshold-input" type="number" step="0.1" value="-50" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Reset (mV)</span>
+                      <input id="reset-input" type="number" step="0.1" value="-60" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Resting (mV)</span>
+                      <input id="resting-input" type="number" step="0.1" value="-49" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Excitatory weight (mV)</span>
+                      <input id="excitatory-weight-input" type="number" step="0.1" value="1.62" />
+                    </label>
+                    <label class="field-block">
+                      <span class="field-label">Inhibitory weight (mV)</span>
+                      <input id="inhibitory-weight-input" type="number" step="0.1" value="-9" />
+                    </label>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <div id="upload-panel" class="hidden">
+              <label class="upload-card" for="file-input">
+                <input id="file-input" type="file" accept=".py,text/x-python" />
+                <strong id="file-name">Drop or choose a Python file</strong>
+                <span>Uploaded scripts run locally. For rich UI output, print `RESULT_JSON:` followed by JSON.</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel editor-panel">
+            <div class="section-head compact">
+              <div>
+                <p class="section-kicker">Script</p>
+                <h2>Live code preview</h2>
+              </div>
+              <p class="section-note">Editable before execution.</p>
+            </div>
+            <textarea id="script-editor" class="script-editor" spellcheck="false"></textarea>
+          </section>
+        </section>
+
+        <section class="output-grid">
+          <section class="panel chart-panel">
+            <div class="section-head compact">
+              <div>
+                <p class="section-kicker">Result plot</p>
+                <h2>Voltage trace</h2>
+              </div>
+              <p class="section-note">Generated from structured result data.</p>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="trace-chart" width="900" height="360"></canvas>
+            </div>
+          </section>
+
+          <section class="panel output-panel">
+            <div class="section-head compact">
+              <div>
+                <p class="section-kicker">Execution output</p>
+                <h2>Result explanation and logs</h2>
+              </div>
+            </div>
+            <div class="log-tabs">
+              <button class="log-tab active" data-log-target="summary" type="button">Readable Result</button>
+              <button class="log-tab" data-log-target="payload" type="button">Raw Result</button>
+              <button class="log-tab" data-log-target="stdout" type="button">Stdout</button>
+              <button class="log-tab" data-log-target="stderr" type="button">Stderr</button>
+            </div>
+            <pre class="log-view" id="log-view"></pre>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js?v=20260329d" type="module"></script>
+  </body>
+</html>
