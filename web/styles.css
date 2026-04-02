@@ -395,6 +395,16 @@ textarea {
   background: #fff;
 }
 
+.chart-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.chart-select-block {
+  min-width: 220px;
+}
+
 canvas {
   display: block;
   width: 100%;
@@ -475,5 +485,15 @@ canvas {
 
   .script-editor {
     min-height: 420px;
+  }
+
+  .chart-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chart-select-block {
+    min-width: 0;
+    width: 100%;
   }
 }

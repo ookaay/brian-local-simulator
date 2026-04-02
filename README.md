@@ -65,7 +65,7 @@ python run_project.py --host 127.0.0.1 --port 8000
 - edit the generated script before running it
 - upload or paste your own Python Brian script
 - run the simulation locally
-- inspect parsed result data, stdout, stderr, and voltage traces
+- inspect parsed result data, stdout, stderr, and structured plots
 
 ### Important Note
 
@@ -116,6 +116,50 @@ print("RESULT_JSON:" + json.dumps(payload))
 ```
 
 If no structured payload is printed, the project still returns stdout, stderr, and a small inferred summary when possible.
+
+### Custom Plot Format
+
+The web UI can render custom `line`, `scatter`, and `bar` plots from uploaded scripts.
+
+Example:
+
+```python
+import json
+
+payload = {
+    "title": "Custom analysis",
+    "summary": {
+        "neurons": 1000,
+        "duration_ms": 200,
+    },
+    "plots": {
+        "charts": [
+            {
+                "id": "membrane",
+                "title": "Membrane potential",
+                "type": "line",
+                "x": [0, 1, 2, 3, 4],
+                "y": [-65, -63, -60, -58, -61],
+                "x_label": "Time (ms)",
+                "y_label": "Voltage (mV)",
+            },
+            {
+                "id": "rates",
+                "title": "Population firing rate",
+                "type": "bar",
+                "x": ["E", "I"],
+                "y": [18.2, 11.4],
+                "x_label": "Population",
+                "y_label": "Rate (Hz)",
+            },
+        ]
+    },
+}
+
+print("RESULT_JSON:" + json.dumps(payload))
+```
+
+Generated CUBA scripts still return the built-in voltage trace automatically, and the UI keeps supporting that legacy format.
 
 ## 3. Run Benchmarks
 

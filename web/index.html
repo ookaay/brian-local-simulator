@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Brian Simulation Control Center</title>
-    <link rel="stylesheet" href="./styles.css?v=20260329d" />
+    <link rel="stylesheet" href="./styles.css?v=20260402a" />
   </head>
   <body>
     <div class="shell">
@@ -198,9 +198,15 @@
             <div class="section-head compact">
               <div>
                 <p class="section-kicker">Result plot</p>
-                <h2>Voltage trace</h2>
+                <h2>Structured plots</h2>
               </div>
-              <p class="section-note">Generated from structured result data.</p>
+              <div class="chart-controls">
+                <label class="field-block chart-select-block" for="plot-select">
+                  <span class="field-label">Plot selection</span>
+                  <select id="plot-select"></select>
+                </label>
+                <p class="section-note">Generated from structured result data.</p>
+              </div>
             </div>
             <div class="chart-wrap">
               <canvas id="trace-chart" width="900" height="360"></canvas>
@@ -226,6 +232,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=20260329d" type="module"></script>
+    <script src="./app.js?v=20260402a" type="module"></script>
   </body>
 </html>

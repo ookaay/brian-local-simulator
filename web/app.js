@@ -14,6 +14,7 @@ const fileNameNode = document.getElementById("file-name");
 const scriptEditor = document.getElementById("script-editor");
 const logView = document.getElementById("log-view");
 const chartCanvas = document.getElementById("trace-chart");
+const plotSelect = document.getElementById("plot-select");
 const builderTitleNode = document.querySelector(".builder-panel h2");
 const builderNoteNode = document.querySelector(".builder-panel .section-note");
 
@@ -26,6 +27,7 @@ const state = {
   previewScript: "",
   previewDirty: false,
   uploadDraft: "",
+  selectedPlotId: null,
 };
 
 const formFields = {
@@ -295,6 +297,7 @@ async function runSimulation() {
     state.selectedLog = data.ok ? "summary" : "stderr";
     renderSummary();
     renderLogs();
+    renderPlotSelector();
     drawChart();
     runStatusNode.textContent = data.ok ? "Simulation complete." : "Simulation failed.";
   } catch (error) {
@@ -307,6 +310,7 @@ async function runSimulation() {
     };
     renderSummary();
     renderLogs();
+    renderPlotSelector();
     drawChart();
     runStatusNode.textContent = "Simulation failed.";
   } finally {
@@ -322,10 +326,139 @@ function formatCount(value) {
   return typeof value === "number" ? value.toLocaleString() : "n/a";
 }
 
-function hasVoltageTrace(payload) {
-  const trace = payload?.plots?.voltage_trace_mv;
-  const time = payload?.plots?.time_ms;
-  return Boolean(trace && time && trace.length && trace.length === time.length);
+function normalizePlotEntry(plot, fallbackId, fallbackTitle) {
+  if (!plot || typeof plot !== "object" || Array.isArray(plot)) {
+    return null;
+  }
+
+  const rawY = Array.isArray(plot.y) ? plot.y : Array.isArray(plot.values) ? plot.values : null;
+  if (!rawY?.length) {
+    return null;
+  }
+
+  const y = rawY.map((value) => Number(value));
+  if (y.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  const type = ["line", "scatter", "bar"].includes(plot.type) ? plot.type : "line";
+  const rawX = Array.isArray(plot.x) ? plot.x : Array.isArray(plot.labels) ? plot.labels : null;
+
+  if (rawX && rawX.length !== y.length) {
+    return null;
+  }
+
+  if (type === "bar") {
+    const categories = (rawX || y.map((_, index) => index + 1)).map((value) => String(value));
+    return {
+      id: String(plot.id || fallbackId),
+      title: String(plot.title || fallbackTitle || fallbackId),
+      type,
+      x: categories,
+      y,
+      xLabel: String(plot.x_label || plot.xLabel || "Category"),
+      yLabel: String(plot.y_label || plot.yLabel || "Value"),
+    };
+  }
+
+  let x = rawX ? rawX.map((value) => Number(value)) : y.map((_, index) => index);
+  if (x.some((value) => !Number.isFinite(value))) {
+    x = y.map((_, index) => index);
+  }
+
+  return {
+    id: String(plot.id || fallbackId),
+    title: String(plot.title || fallbackTitle || fallbackId),
+    type,
+    x,
+    y,
+    xLabel: String(plot.x_label || plot.xLabel || "X"),
+    yLabel: String(plot.y_label || plot.yLabel || "Y"),
+  };
+}
+
+function getAvailablePlots(payload) {
+  const plots = [];
+  const source = payload?.plots;
+
+  if (Array.isArray(source?.charts)) {
+    source.charts.forEach((plot, index) => {
+      const normalized = normalizePlotEntry(plot, plot?.id || `plot-${index + 1}`, `Plot ${index + 1}`);
+      if (normalized) {
+        plots.push(normalized);
+      }
+    });
+  }
+
+  if (source && typeof source === "object") {
+    Object.entries(source).forEach(([key, value]) => {
+      if (key === "charts" || key === "voltage_trace_mv" || key === "time_ms") {
+        return;
+      }
+      const normalized = normalizePlotEntry(value, key, key.replaceAll("_", " "));
+      if (normalized) {
+        plots.push(normalized);
+      }
+    });
+  }
+
+  const trace = source?.voltage_trace_mv;
+  const time = source?.time_ms;
+  if (Array.isArray(trace) && Array.isArray(time) && trace.length && trace.length === time.length) {
+    plots.unshift({
+      id: "voltage-trace",
+      title: "Voltage trace",
+      type: "line",
+      x: time.map((value) => Number(value)),
+      y: trace.map((value) => Number(value)),
+      xLabel: "Time (ms)",
+      yLabel: "Voltage (mV)",
+    });
+  }
+
+  return plots.filter((plot, index, items) => items.findIndex((item) => item.id === plot.id) === index);
+}
+
+function getSelectedPlot(payload) {
+  const plots = getAvailablePlots(payload);
+  if (!plots.length) {
+    state.selectedPlotId = null;
+    return null;
+  }
+
+  if (!plots.some((plot) => plot.id === state.selectedPlotId)) {
+    state.selectedPlotId = plots[0].id;
+  }
+
+  return plots.find((plot) => plot.id === state.selectedPlotId) || plots[0];
+}
+
+function renderPlotSelector() {
+  const plots = getAvailablePlots(state.result?.result);
+  if (!plots.length) {
+    plotSelect.innerHTML = `<option value="">No plots available</option>`;
+    plotSelect.disabled = true;
+    return;
+  }
+
+  if (!plots.some((plot) => plot.id === state.selectedPlotId)) {
+    state.selectedPlotId = plots[0].id;
+  }
+
+  plotSelect.disabled = plots.length === 1;
+  plotSelect.innerHTML = plots
+    .map(
+      (plot) =>
+        `<option value="${plot.id}" ${plot.id === state.selectedPlotId ? "selected" : ""}>${plot.title}</option>`
+    )
+    .join("");
+}
+
+function bindPlotSelect() {
+  plotSelect.addEventListener("change", () => {
+    state.selectedPlotId = plotSelect.value || null;
+    drawChart();
+  });
 }
 
 function getPrimarySpikeCount(summary) {
@@ -339,8 +472,8 @@ function getResultHeadline(result, payload, summary) {
   if (typeof getPrimarySpikeCount(summary) === "number") {
     return `${formatCount(getPrimarySpikeCount(summary))} spikes recorded`;
   }
-  if (hasVoltageTrace(payload)) {
-    return "Voltage trace captured";
+  if (getAvailablePlots(payload).length) {
+    return "Structured plot ready";
   }
   return "Run completed";
 }
@@ -465,7 +598,7 @@ function renderSummary() {
   const title = payload.title || (state.result.ok ? "Simulation completed" : "Simulation failed");
   const notes = payload.notes?.join(" ") || state.result.error || "No extra notes.";
   const spikeCount = getPrimarySpikeCount(summary);
-  const traceReady = hasVoltageTrace(payload);
+  const plotCount = getAvailablePlots(payload).length;
 
   summaryPanel.innerHTML = `
     <article class="metric-card featured">
@@ -484,9 +617,9 @@ function renderSummary() {
       <span class="metric-copy">Measured around the full local subprocess run.</span>
     </article>
     <article class="metric-card">
-      <span class="metric-label">${traceReady ? "Trace" : "Notes"}</span>
-      <strong class="metric-value">${traceReady ? "Available" : formatCount(spikeCount)}</strong>
-      <span class="metric-copy">${traceReady ? "A structured voltage trace was returned for this run." : notes}</span>
+      <span class="metric-label">${plotCount ? "Plots" : "Notes"}</span>
+      <strong class="metric-value">${plotCount ? formatCount(plotCount) : formatCount(spikeCount)}</strong>
+      <span class="metric-copy">${plotCount ? "Structured plot data was returned for this run." : notes}</span>
     </article>
   `;
 }
@@ -535,26 +668,70 @@ function drawChart() {
 
   ctx.fillStyle = "#fff8ef";
   ctx.fillRect(0, 0, width, height);
-
-  const trace = state.result?.result?.plots?.voltage_trace_mv;
-  const time = state.result?.result?.plots?.time_ms;
-
-  if (!trace || !time || !trace.length || trace.length !== time.length) {
+  const plot = getSelectedPlot(state.result?.result);
+  if (!plot) {
     ctx.fillStyle = "#6d797f";
     ctx.font = "16px Palatino Linotype";
-    ctx.fillText("No structured voltage trace returned for this run.", 28, 42);
+    ctx.fillText("No structured plot returned for this run.", 28, 42);
     ctx.font = "14px Palatino Linotype";
-    ctx.fillText("Generated CUBA scripts include this automatically.", 28, 68);
+    ctx.fillText("Return RESULT_JSON with plots.charts to draw custom plots.", 28, 68);
     return;
   }
 
-  const padding = { top: 28, right: 26, bottom: 48, left: 62 };
+  const padding = { top: 28, right: 26, bottom: 54, left: 62 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const minX = Math.min(...time);
-  const maxX = Math.max(...time);
-  const minY = Math.min(...trace);
-  const maxY = Math.max(...trace);
+
+  ctx.fillStyle = "#4f5d65";
+  ctx.font = "15px Palatino Linotype";
+  ctx.fillText(plot.title, padding.left, 16);
+
+  if (plot.type === "bar") {
+    const maxY = Math.max(...plot.y, 0);
+    const spanY = Math.max(1, maxY);
+    const barWidth = plotWidth / Math.max(plot.y.length, 1);
+    const yFor = (value) => padding.top + plotHeight - (value / spanY) * plotHeight;
+
+    ctx.strokeStyle = "rgba(28, 39, 48, 0.1)";
+    ctx.lineWidth = 1;
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const yValue = (spanY / 4) * tick;
+      const y = yFor(yValue);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(padding.left + plotWidth, y);
+      ctx.stroke();
+      ctx.fillStyle = "#69767c";
+      ctx.font = "13px Palatino Linotype";
+      ctx.fillText(yValue.toFixed(1), 14, y + 4);
+    }
+
+    ctx.strokeStyle = "#24323a";
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, padding.top + plotHeight);
+    ctx.lineTo(padding.left + plotWidth, padding.top + plotHeight);
+    ctx.stroke();
+
+    ctx.fillStyle = "#de7649";
+    plot.y.forEach((value, index) => {
+      const x = padding.left + index * barWidth + barWidth * 0.15;
+      const y = yFor(value);
+      const h = padding.top + plotHeight - y;
+      ctx.fillRect(x, y, Math.max(2, barWidth * 0.7), h);
+    });
+
+    ctx.fillStyle = "#4f5d65";
+    ctx.font = "14px Palatino Linotype";
+    ctx.fillText(plot.yLabel, padding.left, 34);
+    ctx.fillText(plot.xLabel, width - 110, height - 12);
+    return;
+  }
+
+  const minX = Math.min(...plot.x);
+  const maxX = Math.max(...plot.x);
+  const minY = Math.min(...plot.y);
+  const maxY = Math.max(...plot.y);
   const spanX = Math.max(1, maxX - minX);
   const spanY = Math.max(1, maxY - minY);
   const xFor = (value) => padding.left + ((value - minX) / spanX) * plotWidth;
@@ -581,24 +758,38 @@ function drawChart() {
   ctx.lineTo(padding.left + plotWidth, padding.top + plotHeight);
   ctx.stroke();
 
-  ctx.strokeStyle = "#de7649";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  trace.forEach((value, index) => {
-    const x = xFor(time[index]);
-    const y = yFor(value);
-    if (index === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
-  });
-  ctx.stroke();
+  ctx.fillStyle = "#4f5d65";
+  ctx.font = "13px Palatino Linotype";
+  ctx.fillText(minX.toFixed(1), padding.left, height - 20);
+  ctx.fillText(maxX.toFixed(1), width - padding.right - 24, height - 20);
+
+  if (plot.type === "scatter") {
+    ctx.fillStyle = "#de7649";
+    plot.y.forEach((value, index) => {
+      ctx.beginPath();
+      ctx.arc(xFor(plot.x[index]), yFor(value), 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else {
+    ctx.strokeStyle = "#de7649";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    plot.y.forEach((value, index) => {
+      const x = xFor(plot.x[index]);
+      const y = yFor(value);
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.stroke();
+  }
 
   ctx.fillStyle = "#4f5d65";
   ctx.font = "14px Palatino Linotype";
-  ctx.fillText("Voltage (mV)", padding.left, 16);
-  ctx.fillText("Time (ms)", width - 88, height - 12);
+  ctx.fillText(plot.yLabel, padding.left, 34);
+  ctx.fillText(plot.xLabel, width - 110, height - 12);
 }
 
 function initEditorState() {
@@ -617,9 +808,11 @@ async function init() {
     bindUploadInput();
     bindLogTabs();
     bindEditor();
+    bindPlotSelect();
     renderMode();
     renderSummary();
     renderLogs();
+    renderPlotSelector();
     drawChart();
     await refreshPreview();
     runButton.addEventListener("click", runSimulation);
