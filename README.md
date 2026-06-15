@@ -1,17 +1,17 @@
 # Brian Local Simulation Studio
 
-Brian Local Simulation Studio is a local Python project for building, running, and benchmarking Brian2 simulations on your own machine.
+Brian Local Simulation Studio is a local web application for building, running, and benchmarking Brian2 simulations on your own machine.
 
 It has three main parts:
 
-- a local web app for generating or uploading simulation scripts
-- a reusable Python simulation service
+- a local web app (Node.js) for generating or uploading simulation scripts
+- a lightweight Node.js API server that spawns Brian2 Python scripts
 - a benchmark script for comparing backend performance
 
 ## Requirements
 
-- Python 3
-- `brian2`
+- **Node.js** 22+ (for the server and CLI tools)
+- **Python 3** with `brian2` (simulations run as Python subprocesses)
 
 Install the base dependency:
 
@@ -30,12 +30,14 @@ pip install -r requirements-gpu.txt
 ## Project Layout
 
 ```text
-run_project.py          Start the local web app
-simulation_service.py   Core simulation execution API
-benchmark.py            Performance benchmark runner
-brian_common.py         Shared constants and helper functions
-web/                    Browser UI files
-results/                Saved benchmark output and run artifacts
+server.js                Node.js HTTP server (zero dependencies)
+simulation-service.js    Core simulation execution API (spawns Python)
+benchmark.js             Performance benchmark runner (Node.js CLI)
+common.js                Shared constants and helper functions
+web/                     Browser UI files (unchanged)
+results/                 Saved benchmark output and run artifacts
+package.json             Project metadata and scripts
+requirements.txt         Python dependencies (Brian2)
 ```
 
 ## 1. Run the Web App
@@ -43,7 +45,13 @@ results/                Saved benchmark output and run artifacts
 Start the local server:
 
 ```bash
-python run_project.py
+node server.js
+```
+
+Or with npm:
+
+```bash
+npm start
 ```
 
 Open this in your browser:
@@ -55,7 +63,7 @@ http://127.0.0.1:8000/web/
 You can also choose a different host or port:
 
 ```bash
-python run_project.py --host 127.0.0.1 --port 8000
+node server.js --host 127.0.0.1 --port 8080
 ```
 
 ### What You Can Do in the Web App
@@ -73,31 +81,27 @@ Uploaded scripts execute on your local machine. Only run code you trust.
 
 ## 2. Use the Simulation Service Directly
 
-If you do not want the browser UI, you can call the backend directly from Python.
+If you do not want the browser UI, you can call the backend from JavaScript or via HTTP directly.
 
-Main functions in `simulation_service.py`:
+HTTP API endpoints:
 
-- `get_runtime_info()`
-- `preview_generated_script(config)`
-- `run_simulation_request(payload)`
+- `GET /api/info` — runtime information and backend support
+- `POST /api/preview` — generate a CUBA script from config (returns source code)
+- `POST /api/run` — execute a simulation and return structured results
 
-Example:
+Example using `curl`:
 
-```python
-from simulation_service import run_simulation_request
-
-result = run_simulation_request(
-    {
-        "mode": "generate",
-        "backend": "numpy",
-        "generate": {
-            "neurons": 1000,
-            "duration_ms": 100,
-        },
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/run \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "generate",
+    "backend": "numpy",
+    "generate": {
+      "neurons": 1000,
+      "duration_ms": 100
     }
-)
-
-print(result)
+  }'
 ```
 
 ### Supported Modes
@@ -163,18 +167,24 @@ Generated CUBA scripts still return the built-in voltage trace automatically, an
 
 ## 3. Run Benchmarks
 
-Use `benchmark.py` to measure how different Brian backends perform.
+Use `benchmark.js` to measure how different Brian backends perform.
 
 Basic usage:
 
 ```bash
-python benchmark.py
+node benchmark.js
+```
+
+Or with npm:
+
+```bash
+npm run benchmark
 ```
 
 Example with custom settings:
 
 ```bash
-python benchmark.py --neurons 1000 4000 8000 --duration-ms 300 --repeats 2
+node benchmark.js --neurons 1000 4000 8000 --duration-ms 300 --repeats 2
 ```
 
 This writes aggregated benchmark output to:
@@ -194,27 +204,24 @@ This is useful for comparing `numpy`, `cpp_standalone`, and `cuda_standalone` on
 
 ### Benchmark Output Format
 
-The benchmark now prints a human-readable summary to the terminal before saving the full JSON file.
+The benchmark prints a human-readable summary to the terminal before saving the full JSON file.
 
 Example:
 
 ```text
 Benchmark Summary
-Model: CUBA | Duration: 20 ms | Repeats: 1
-Backends: numpy | Scenarios: subgroups, split_groups
+Model: CUBA | Duration: 300 ms | Repeats: 2
+Backends: numpy, cpp_standalone, cuda_standalone | Scenarios: subgroups, split_groups
 
-Fastest overall: numpy / subgroups / 100 neurons in 0.212118s
-100 neurons: numpy / subgroups won at 0.212118s (7.35% faster than the next option, 0.016834s ahead)
-
-Best scenario per backend:
-- numpy: subgroups at 100 neurons finished in 0.212118s
+Fastest overall: cpp_standalone / split_groups / 4000 neurons in 1.392000s
+4000 neurons: cpp_standalone / split_groups won at 1.392000s ...
 
 Results Table
 Backend  Scenario      Neurons  Runs  Mean (s)  Min (s)   Max (s)   Spikes  Status
 ...
 ```
 
-The saved JSON still contains the full raw results, and now also includes a `highlights` section with:
+The saved JSON contains the full raw results and a `highlights` section with:
 
 - `fastest_overall`
 - `fastest_per_neuron_count`
@@ -232,7 +239,7 @@ Backend availability is checked at runtime.
 
 ## Shared Helpers
 
-`brian_common.py` contains shared project constants and helpers such as:
+`common.js` contains shared project constants and helpers such as:
 
 - supported backends
 - default CUBA parameters
@@ -241,10 +248,10 @@ Backend availability is checked at runtime.
 
 ## Typical Workflow
 
-1. Install dependencies.
-2. Run `python run_project.py`.
+1. Install Node.js dependencies (none — zero-dep project) and Python dependencies (`pip install -r requirements.txt`).
+2. Run `node server.js` (or `npm start`).
 3. Open the browser UI.
 4. Choose a backend.
 5. Generate or upload a script.
 6. Run the simulation locally.
-7. Use `benchmark.py` separately if you want performance comparisons.
+7. Use `node benchmark.js` separately if you want performance comparisons.
