@@ -1,151 +1,202 @@
 # Brian Local Simulation Studio
 
-Brian Local Simulation Studio is a local Python project for building, running, and benchmarking Brian2 simulations on your own machine.
+A web interface for [Brian2](https://briansimulator.org/), the spiking neural network simulator.
 
-It has three main parts:
+If you do computational neuroscience — or want to try — this project lets you build, run, and benchmark Brian2 simulations from your browser without writing Python by hand.
 
-- a local web app for generating or uploading simulation scripts
-- a reusable Python simulation service
-- a benchmark script for comparing backend performance
+---
+
+## What is Brian2?
+
+Brian2 is a Python library for simulating spiking neural networks. You define neurons by writing their differential equations in plain mathematical notation, connect them with synapses, and Brian2 compiles everything into efficient code and runs it. It is free, open source, and used in hundreds of published research papers.
+
+A minimal Brian2 simulation looks like this:
+
+```python
+from brian2 import *
+
+neurons = NeuronGroup(100, "dv/dt = -v / (10*ms) : volt", threshold="v > -50*mV")
+neurons.v = "-60*mV"
+run(100*ms)
+```
+
+This project is a layer on top of that.
+
+---
+
+## What this project does
+
+Instead of editing Python files and running them from the terminal, you get a local web app where you can:
+
+- **Tune a standard network** — sliders and dropdowns for neuron count, connection strength, time constants, etc.
+- **See the code** — the generated Python script appears in an editor. You can tweak it before running.
+- **Run it** — pick a backend (`numpy`, `cpp_standalone`, or `cuda_standalone`) and click a button.
+- **See results** — spike counts, runtime, a voltage trace plot, and the full stdout/stderr.
+- **Upload your own scripts** — the web UI parses structured results from any Brian2 script.
+
+There is also a **benchmark** script that measures how each backend performs across different network sizes.
+
+The project uses only Python's standard library for the server — no Flask, no Django, no external dependencies beyond Brian2 itself.
+
+---
+
+## The model: CUBA
+
+The default network is the standard Brian2 example, **CUBA** (COBA with UDB — Conductance-Based with Unified Differential Equations). It is a random network of excitatory (80%) and inhibitory (20%) neurons where each spike drives the target's conductance up or down. The neuron equation is a leaky integrate-and-fire model with conductance-based synapses:
+
+```
+dv/dt  = (ge + gi - (v - el)) / taum    # membrane voltage
+dge/dt = -ge / taue                      # excitatory conductance
+dgi/dt = -gi / taui                      # inhibitory conductance
+```
+
+This is a well-understood benchmark for comparing backends because it exercises synaptic propagation, conductance updates, and spike detection — the three most expensive parts of any spiking network simulation.
+
+---
 
 ## Requirements
 
-- Python 3
-- `brian2`
+| Dependency | Why |
+|---|---|
+| **Python 3.10+** | The language Brian2 speaks |
+| **brian2** | The simulator itself |
+| *(optional)* **brian2cuda** | GPU backend (`cuda_standalone`) |
+| *(optional)* **C++ compiler** | Required by `cpp_standalone` and `cuda_standalone` |
 
-Install the base dependency:
+### Install Brian2
 
 ```bash
 pip install -r requirements.txt
 ```
 
-If you want CUDA backend support as well:
+This installs Brian2 and its dependencies (NumPy, etc.).
+
+If you have an NVIDIA GPU and want CUDA support:
 
 ```bash
 pip install -r requirements-gpu.txt
 ```
 
-`cpp_standalone` and `cuda_standalone` also require the relevant local compiler and toolchain support.
+---
 
-## Project Layout
+## Project layout
 
-```text
-run_project.py          Start the local web app
-simulation_service.py   Core simulation execution API
-benchmark.py            Performance benchmark runner
-brian_common.py         Shared constants and helper functions
-web/                    Browser UI files
-results/                Saved benchmark output and run artifacts
+```
+run_project.py          HTTP server (zero external dependencies)
+simulation_service.py   Spawns Python subprocesses to run simulations
+benchmark.py            Measures backend performance across network sizes
+brian_common.py         Shared defaults, equations, and helpers
+web/                    Browser UI (HTML + vanilla JS + CSS)
+results/                Benchmark JSON output and per-run artifacts
+requirements.txt        pip dependencies (just brian2)
+requirements-gpu.txt    Adds brian2cuda for GPU support
 ```
 
-## 1. Run the Web App
+---
 
-Start the local server:
+## 1. Run the web app
 
 ```bash
 python run_project.py
 ```
 
-Open this in your browser:
+Open **[http://127.0.0.1:8000/web/](http://127.0.0.1:8000/web/)** in your browser.
 
-```text
-http://127.0.0.1:8000/web/
-```
-
-You can also choose a different host or port:
+Optional flags:
 
 ```bash
-python run_project.py --host 127.0.0.1 --port 8000
+python run_project.py --host 0.0.0.0 --port 8080
 ```
 
-### What You Can Do in the Web App
+### What you see
 
-- choose a backend: `numpy`, `cpp_standalone`, or `cuda_standalone`
-- generate a configurable CUBA simulation script from form inputs
-- edit the generated script before running it
-- upload or paste your own Python Brian script
-- run the simulation locally
-- inspect parsed result data, stdout, stderr, and structured plots
+| Panel | What it does |
+|---|---|
+| **Input source** | Toggle between the CUBA Builder (form) and Upload Script (paste a file) |
+| **Execution target** | Pick a backend — only installed backends are enabled |
+| **CUBA controls** | Sliders for every parameter of the network |
+| **Live code preview** | The generated Python script, editable before you run it |
+| **Run Simulation** | Executes the script locally and returns results |
+| **Structured plots** | Voltage trace (generated scripts) or custom charts from uploaded scripts |
+| **Logs** | Readable result, raw JSON, stdout, stderr |
 
-### Important Note
+### Security note
 
-Uploaded scripts execute on your local machine. Only run code you trust.
+Uploaded scripts execute on your machine. Only run code you trust.
 
-## 2. Use the Simulation Service Directly
+---
 
-If you do not want the browser UI, you can call the backend directly from Python.
+## 2. Use the API directly (no browser)
 
-Main functions in `simulation_service.py`:
+The server exposes three JSON endpoints that you can call with `curl` or any HTTP client.
 
-- `get_runtime_info()`
-- `preview_generated_script(config)`
-- `run_simulation_request(payload)`
+### `GET /api/info`
 
-Example:
+```bash
+curl http://127.0.0.1:8000/api/info
+```
 
-```python
-from simulation_service import run_simulation_request
+Returns the Python version and which backends are available.
 
-result = run_simulation_request(
-    {
-        "mode": "generate",
-        "backend": "numpy",
-        "generate": {
-            "neurons": 1000,
-            "duration_ms": 100,
-        },
+### `POST /api/preview`
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/preview \
+  -H 'Content-Type: application/json' \
+  -d '{"generate": {"neurons": 100, "duration_ms": 20}}'
+```
+
+Returns the generated Python source without running it.
+
+### `POST /api/run`
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/run \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "generate",
+    "backend": "numpy",
+    "generate": {
+      "neurons": 1000,
+      "duration_ms": 100
     }
-)
-
-print(result)
+  }'
 ```
 
-### Supported Modes
+Runs the simulation and returns structured results (spike count, runtime, traces, plots).
 
-- `generate`: build a CUBA script from config values
-- `upload`: run a Python script provided as text
+You can also run your own Brian2 scripts via the `upload` mode:
 
-### Structured Result Output
-
-Generated scripts already emit structured JSON automatically.
-
-For uploaded scripts, print a line in this format if you want rich UI output:
-
-```python
-print("RESULT_JSON:" + json.dumps(payload))
+```bash
+curl -X POST http://127.0.0.1:8000/api/run \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "upload",
+    "backend": "numpy",
+    "script_source": "from brian2 import *\nneurons = NeuronGroup(100, ...)"
+  }'
 ```
 
-If no structured payload is printed, the project still returns stdout, stderr, and a small inferred summary when possible.
+### Structured result format
 
-### Custom Plot Format
-
-The web UI can render custom `line`, `scatter`, and `bar` plots from uploaded scripts.
-
-Example:
+Generated scripts automatically print a `RESULT_JSON:` line with spike counts, simulation time, and a voltage trace. If you upload your own script, you can emit the same format:
 
 ```python
 import json
 
 payload = {
-    "title": "Custom analysis",
+    "title": "My simulation",
     "summary": {
         "neurons": 1000,
         "duration_ms": 200,
+        "spike_count": 1523,
+        "simulation_seconds": 0.45,
     },
     "plots": {
         "charts": [
             {
-                "id": "membrane",
-                "title": "Membrane potential",
-                "type": "line",
-                "x": [0, 1, 2, 3, 4],
-                "y": [-65, -63, -60, -58, -61],
-                "x_label": "Time (ms)",
-                "y_label": "Voltage (mV)",
-            },
-            {
                 "id": "rates",
-                "title": "Population firing rate",
+                "title": "Firing rates",
                 "type": "bar",
                 "x": ["E", "I"],
                 "y": [18.2, 11.4],
@@ -159,92 +210,83 @@ payload = {
 print("RESULT_JSON:" + json.dumps(payload))
 ```
 
-Generated CUBA scripts still return the built-in voltage trace automatically, and the UI keeps supporting that legacy format.
+The web UI renders `line`, `scatter`, and `bar` chart types from the `plots.charts` array. If no `RESULT_JSON` is printed, the project falls back to scanning the script's namespace for `SpikeMonitor` objects.
 
-## 3. Run Benchmarks
+---
 
-Use `benchmark.py` to measure how different Brian backends perform.
+## 3. Run benchmarks
 
-Basic usage:
+The benchmark script compares how fast each backend runs the same CUBA network at different sizes.
 
 ```bash
 python benchmark.py
 ```
 
-Example with custom settings:
+This runs all backends × both scenarios × 1000/4000/8000 neurons, 2 repeats each, and prints a summary:
 
-```bash
-python benchmark.py --neurons 1000 4000 8000 --duration-ms 300 --repeats 2
 ```
-
-This writes aggregated benchmark output to:
-
-```text
-results/latest.json
-```
-
-### What the Benchmark Measures
-
-- runtime across backends
-- runtime across neuron counts
-- success or failure of each run
-- spike counts from the simulated network
-
-This is useful for comparing `numpy`, `cpp_standalone`, and `cuda_standalone` on the same model.
-
-### Benchmark Output Format
-
-The benchmark now prints a human-readable summary to the terminal before saving the full JSON file.
-
-Example:
-
-```text
 Benchmark Summary
-Model: CUBA | Duration: 20 ms | Repeats: 1
-Backends: numpy | Scenarios: subgroups, split_groups
+Model: CUBA | Duration: 300 ms | Repeats: 2
+Backends: numpy, cpp_standalone | Scenarios: subgroups, split_groups
 
-Fastest overall: numpy / subgroups / 100 neurons in 0.212118s
-100 neurons: numpy / subgroups won at 0.212118s (7.35% faster than the next option, 0.016834s ahead)
-
-Best scenario per backend:
-- numpy: subgroups at 100 neurons finished in 0.212118s
+Fastest overall: cpp_standalone / split_groups / 8000 neurons in 2.744000s
+4000 neurons: cpp_standalone / split_groups won at 1.392000s ...
 
 Results Table
-Backend  Scenario      Neurons  Runs  Mean (s)  Min (s)   Max (s)   Spikes  Status
+Backend          Scenario      Neurons  Runs  Mean (s)  Min (s)   Max (s)   Spikes  Status
 ...
 ```
 
-The saved JSON still contains the full raw results, and now also includes a `highlights` section with:
+Results are saved to `results/latest.json` with full details and a `highlights` section identifying the fastest configurations.
 
-- `fastest_overall`
-- `fastest_per_neuron_count`
-- `fastest_per_backend`
-- `failed_configurations`
-- `unavailable_backends`
+Custom neuron counts or durations:
 
-## Backends
+```bash
+python benchmark.py --neurons 500 2000 --duration-ms 100 --repeats 3
+```
 
-- `numpy`: baseline CPU backend
-- `cpp_standalone`: generated C++ standalone execution
-- `cuda_standalone`: GPU execution through Brian2CUDA if installed
+---
 
-Backend availability is checked at runtime.
+## Backends explained
 
-## Shared Helpers
+| Backend | How it works | Best for |
+|---|---|---|
+| `numpy` | Pure Python loops, no compilation | Testing small networks, quick iteration |
+| `cpp_standalone` | Brian2 generates C++ code, compiles it, and runs the binary | Large networks on CPU (10×–100× faster than numpy) |
+| `cuda_standalone` | Brian2 generates CUDA code and runs on GPU | Very large networks, if you have an NVIDIA GPU |
 
-`brian_common.py` contains shared project constants and helpers such as:
+The benchmark is the best way to see which backend wins on your machine.
 
-- supported backends
-- default CUBA parameters
-- common CUBA equations
-- benchmark scenario metadata
+---
 
-## Typical Workflow
+## How the simulation service works
 
-1. Install dependencies.
-2. Run `python run_project.py`.
-3. Open the browser UI.
-4. Choose a backend.
-5. Generate or upload a script.
-6. Run the simulation locally.
-7. Use `benchmark.py` separately if you want performance comparisons.
+When you click "Run", the server does not call Brian2 directly in the same process. Instead it:
+
+1. Writes your script to a temporary directory.
+2. Writes a small **wrapper script** next to it.
+3. Spawns a **fresh Python subprocess** running the wrapper.
+4. The wrapper sets the Brian2 device, `exec()`s your script, and intercepts `print()` to capture `RESULT_JSON:` lines.
+5. The server parses the result and returns it to the front end.
+
+This isolation matters because Brian2's device system (especially `cpp_standalone` and `cuda_standalone`) uses global state. Each simulation gets a clean slate.
+
+---
+
+## Typical workflow
+
+```bash
+# 1. Install
+pip install -r requirements.txt
+
+# 2. Start the server
+python run_project.py
+
+# 3. Open the browser
+#    → http://127.0.0.1:8000/web/
+
+# 4. Tune parameters, click Run
+
+# 5. Benchmark
+python benchmark.py
+```
