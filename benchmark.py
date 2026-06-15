@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
-"""Benchmark the Brian CUBA example across portable and optional backends."""
+"""Measure how fast each Brian2 backend runs the same CUBA network.
+
+Why benchmark?
+--------------
+Brian2 can target numpy (pure Python), cpp_standalone (compiled C++), and
+cuda_standalone (GPU).  These backends have very different performance
+characteristics depending on network size, and the only way to know which
+one is fastest for *your* machine is to measure.
+
+What this script does
+---------------------
+1. For every combination of (backend, scenario, neuron_count):
+     a. Spawn a fresh Python subprocess so Brian2 device state is isolated.
+     b. Build the CUBA network, run it, and record the wall-clock time.
+     c. Repeat N times (default 2) for statistical stability.
+2. Aggregate the results into a single JSON file.
+3. Print a human-readable summary that highlights:
+     - the fastest configuration overall
+     - the fastest configuration at each neuron count
+     - the best scenario for each backend
+     - any backends that are not installed
+"""
 
 from __future__ import annotations
 
@@ -25,6 +46,7 @@ from brian_common import check_backend_support
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = PROJECT_ROOT / "results"
 LATEST_RESULTS = RESULTS_DIR / "latest.json"
+
 DEFAULT_NEURON_COUNTS = [1000, 4000, 8000]
 ALL_BACKENDS = SUPPORTED_BACKENDS
 ALL_SCENARIOS = list(BENCHMARK_SCENARIOS)
@@ -32,6 +54,7 @@ ALL_SCENARIOS = list(BENCHMARK_SCENARIOS)
 
 @dataclass
 class RunResult:
+    """What we record for a single benchmark run (one backend x scenario x size)."""
     scenario: str
     backend: str
     neuron_count: int
@@ -40,6 +63,11 @@ class RunResult:
     success: bool
     spike_count: int | None = None
     error: str | None = None
+
+
+# =============================================================================
+#  CLI argument parsing
+# =============================================================================
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,12 +110,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--single-run",
         action="store_true",
-        help="Internal mode used to isolate Brian device state per run.",
+        help=(
+            "Internal: run a single backend/scenario/size and print JSON. "
+            "This is how aggregate_results() isolates Brian2 device state."
+        ),
     )
     parser.add_argument(
         "--backend",
         choices=ALL_BACKENDS,
-        help="Internal mode backend selector.",
+        help="Internal: backend selector for --single-run.",
     )
     parser.add_argument(
         "--output",
@@ -98,12 +129,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--scenario",
         choices=ALL_SCENARIOS,
-        help="Internal mode scenario selector.",
+        help="Internal: scenario selector for --single-run.",
     )
     return parser.parse_args()
 
 
-def create_neuron_group(size: int, namespace: dict[str, object]):
+# =============================================================================
+#  CUBA network builders  (used by run_single_backend)
+# =============================================================================
+
+
+def _create_neuron_group(size: int, namespace: dict[str, object]):
+    """Make one NeuronGroup with CUBA equations and randomised initial voltage."""
     from brian2 import NeuronGroup
     from brian2 import mV
     from brian2 import ms
@@ -123,20 +160,24 @@ def create_neuron_group(size: int, namespace: dict[str, object]):
     return neurons
 
 
-def build_cuba_network(neuron_count: int, scenario: str):
+def _build_cuba_network(neuron_count: int, scenario: str):
+    """Assemble the full CUBA network for a given scenario.
+
+    Returns (list_of_monitors, scenario_metadata_dict).
+    """
     from brian2 import NeuronGroup
     from brian2 import SpikeMonitor
     from brian2 import Synapses
     from brian2 import mV
     from brian2 import ms
 
+    # Shared time constants and voltage set-points.
     taum = CUBA_DEFAULTS["taum_ms"] * ms
     taue = CUBA_DEFAULTS["taue_ms"] * ms
     taui = CUBA_DEFAULTS["taui_ms"] * ms
     vt = CUBA_DEFAULTS["threshold_mv"] * mV
     vr = CUBA_DEFAULTS["reset_mv"] * mV
     el = CUBA_DEFAULTS["resting_mv"] * mV
-
     namespace = {"taum": taum, "taue": taue, "taui": taui, "el": el, "vt": vt, "vr": vr}
 
     excitatory_count = max(1, int(neuron_count * CUBA_DEFAULTS["excitatory_ratio"]))
@@ -146,20 +187,20 @@ def build_cuba_network(neuron_count: int, scenario: str):
     wi = CUBA_DEFAULTS["inhibitory_weight_mv"] * mV
 
     if scenario == "subgroups":
-        neurons = create_neuron_group(neuron_count, namespace)
+        # One neuron group, split into two subgroups via slicing.
+        # This is the simpler, more canonical approach.
+        neurons = _create_neuron_group(neuron_count, namespace)
         excitatory = neurons[:excitatory_count]
         inhibitory = neurons[excitatory_count:]
 
-        excitatory_synapses = Synapses(
+        Synapses(
             excitatory, neurons, on_pre="ge += we", namespace={"we": we}
-        )
-        excitatory_synapses.connect(p=CUBA_DEFAULTS["connection_probability"])
+        ).connect(p=CUBA_DEFAULTS["connection_probability"])
 
         if inhibitory_count > 0:
-            inhibitory_synapses = Synapses(
+            Synapses(
                 inhibitory, neurons, on_pre="gi += wi", namespace={"wi": wi}
-            )
-            inhibitory_synapses.connect(p=CUBA_DEFAULTS["connection_probability"])
+            ).connect(p=CUBA_DEFAULTS["connection_probability"])
 
         monitor = SpikeMonitor(neurons)
         return [monitor], {
@@ -168,28 +209,35 @@ def build_cuba_network(neuron_count: int, scenario: str):
         }
 
     if scenario == "split_groups":
-        excitatory = create_neuron_group(excitatory_count, namespace)
+        # Separate NeuronGroups for excitatory and inhibitory populations.
+        # This more closely mirrors how eventspace partitioning works.
+        excitatory = _create_neuron_group(excitatory_count, namespace)
         monitors = [SpikeMonitor(excitatory)]
 
         if inhibitory_count > 0:
-            inhibitory = create_neuron_group(inhibitory_count, namespace)
+            inhibitory = _create_neuron_group(inhibitory_count, namespace)
             monitors.append(SpikeMonitor(inhibitory))
         else:
             inhibitory = None
 
-        synapses = [
-            Synapses(excitatory, excitatory, on_pre="ge += we", namespace={"we": we}),
-        ]
-        synapses[0].connect(p=CUBA_DEFAULTS["connection_probability"])
+        # Excitatory → excitatory
+        Synapses(
+            excitatory, excitatory, on_pre="ge += we", namespace={"we": we}
+        ).connect(p=CUBA_DEFAULTS["connection_probability"])
 
         if inhibitory is not None:
-            exc_to_inh = Synapses(excitatory, inhibitory, on_pre="ge += we", namespace={"we": we})
-            exc_to_inh.connect(p=CUBA_DEFAULTS["connection_probability"])
-            inh_to_exc = Synapses(inhibitory, excitatory, on_pre="gi += wi", namespace={"wi": wi})
-            inh_to_exc.connect(p=CUBA_DEFAULTS["connection_probability"])
-            inh_to_inh = Synapses(inhibitory, inhibitory, on_pre="gi += wi", namespace={"wi": wi})
-            inh_to_inh.connect(p=CUBA_DEFAULTS["connection_probability"])
-            synapses.extend([exc_to_inh, inh_to_exc, inh_to_inh])
+            # Excitatory → inhibitory
+            Synapses(
+                excitatory, inhibitory, on_pre="ge += we", namespace={"we": we}
+            ).connect(p=CUBA_DEFAULTS["connection_probability"])
+            # Inhibitory → excitatory
+            Synapses(
+                inhibitory, excitatory, on_pre="gi += wi", namespace={"wi": wi}
+            ).connect(p=CUBA_DEFAULTS["connection_probability"])
+            # Inhibitory → inhibitory
+            Synapses(
+                inhibitory, inhibitory, on_pre="gi += wi", namespace={"wi": wi}
+            ).connect(p=CUBA_DEFAULTS["connection_probability"])
 
         return monitors, {
             "name": "split_groups",
@@ -199,23 +247,25 @@ def build_cuba_network(neuron_count: int, scenario: str):
     raise ValueError(f"Unsupported scenario: {scenario}")
 
 
-def run_single_backend(backend: str, scenario: str, neuron_count: int, duration_ms: int) -> RunResult:
-    try:
-        from brian2 import ms
-        from brian2 import run
-        from brian2 import set_device
-        from brian2 import start_scope
-    except Exception as exc:
-        return RunResult(
-            scenario=scenario,
-            backend=backend,
-            neuron_count=neuron_count,
-            duration_ms=duration_ms,
-            runtime_seconds=None,
-            success=False,
-            error=f"Failed to import brian2: {exc}",
-        )
+# =============================================================================
+#  Running a single benchmark configuration
+# =============================================================================
 
+
+def run_single_backend(backend: str, scenario: str, neuron_count: int, duration_ms: int) -> RunResult:
+    """Build the network, run it, and return timing + spike data.
+
+    This is called in *two* contexts:
+    1. Directly when --single-run is passed (inside an isolated subprocess).
+    2. Never directly from aggregate_results() — that uses run_isolated_once()
+       which spawns a subprocess that calls this function.
+    """
+    from brian2 import ms
+    from brian2 import run
+    from brian2 import set_device
+    from brian2 import start_scope
+
+    # Is the backend even available?
     supported, reason = check_backend_support(backend)
     if not supported:
         return RunResult(
@@ -231,6 +281,7 @@ def run_single_backend(backend: str, scenario: str, neuron_count: int, duration_
     build_dir: Path | None = None
 
     try:
+        # Standalone backends need a directory to write compiled code.
         if backend == "cpp_standalone":
             build_dir = Path(tempfile.mkdtemp(prefix="brian-cpp-"))
             set_device("cpp_standalone", directory=str(build_dir), build_on_run=True)
@@ -239,7 +290,7 @@ def run_single_backend(backend: str, scenario: str, neuron_count: int, duration_
             set_device("cuda_standalone", directory=str(build_dir), build_on_run=True)
 
         start_scope()
-        monitors, scenario_meta = build_cuba_network(neuron_count, scenario)
+        monitors, scenario_meta = _build_cuba_network(neuron_count, scenario)
 
         start = time.perf_counter()
         run(duration_ms * ms)
@@ -270,25 +321,28 @@ def run_single_backend(backend: str, scenario: str, neuron_count: int, duration_
 
 
 def run_isolated_once(backend: str, scenario: str, neuron_count: int, duration_ms: int) -> RunResult:
+    """Run a single benchmark configuration in a *fresh Python process*.
+
+    Why a subprocess?
+    -----------------
+    Brian2's device system and code generation store state in module-level
+    variables.  If we called run_single_backend() twice in the same process
+    the second call could inherit stale state from the first.  By spawning
+    a subprocess with --single-run we guarantee a completely clean slate.
+
+    The subprocess calls run_single_backend() and prints the RunResult
+    as JSON on stdout, which we parse here.
+    """
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
         "--single-run",
-        "--backend",
-        backend,
-        "--scenario",
-        scenario,
-        "--neurons",
-        str(neuron_count),
-        "--duration-ms",
-        str(duration_ms),
+        "--backend", backend,
+        "--scenario", scenario,
+        "--neurons", str(neuron_count),
+        "--duration-ms", str(duration_ms),
     ]
-    completed = subprocess.run(
-        cmd,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
     if completed.returncode != 0:
         error = completed.stderr.strip() or completed.stdout.strip() or "Unknown subprocess error"
@@ -329,7 +383,16 @@ def run_isolated_once(backend: str, scenario: str, neuron_count: int, duration_m
     return RunResult(**payload)
 
 
+# =============================================================================
+#  Aggregation  (run everything, collect results, find highlights)
+# =============================================================================
+
+
 def aggregate_results(args: argparse.Namespace) -> dict:
+    """Run every requested backend / scenario / neuron_count combination.
+
+    Returns a dict shaped for the benchmark JSON file (see save_results).
+    """
     records = []
     support = {}
     scenario_catalog = BENCHMARK_SCENARIOS
@@ -340,10 +403,12 @@ def aggregate_results(args: argparse.Namespace) -> dict:
 
         for scenario in args.scenarios:
             for neuron_count in args.neurons:
+                # Run N times for statistical stability.
                 attempts = [
                     run_isolated_once(backend, scenario, neuron_count, args.duration_ms)
                     for _ in range(args.repeats)
                 ]
+
                 successful = [
                     item.runtime_seconds
                     for item in attempts
@@ -352,23 +417,22 @@ def aggregate_results(args: argparse.Namespace) -> dict:
                 spike_counts = [item.spike_count for item in attempts if item.spike_count is not None]
                 errors = [item.error for item in attempts if item.error]
 
-                records.append(
-                    {
-                        "scenario": scenario,
-                        "scenario_label": scenario_catalog[scenario]["label"],
-                        "backend": backend,
-                        "neuron_count": neuron_count,
-                        "duration_ms": args.duration_ms,
-                        "repeats": args.repeats,
-                        "successful_runs": len(successful),
-                        "mean_runtime_seconds": round(statistics.mean(successful), 6) if successful else None,
-                        "min_runtime_seconds": round(min(successful), 6) if successful else None,
-                        "max_runtime_seconds": round(max(successful), 6) if successful else None,
-                        "mean_spike_count": round(statistics.mean(spike_counts), 2) if spike_counts else None,
-                        "errors": errors,
-                    }
-                )
+                records.append({
+                    "scenario": scenario,
+                    "scenario_label": scenario_catalog[scenario]["label"],
+                    "backend": backend,
+                    "neuron_count": neuron_count,
+                    "duration_ms": args.duration_ms,
+                    "repeats": args.repeats,
+                    "successful_runs": len(successful),
+                    "mean_runtime_seconds": round(statistics.mean(successful), 6) if successful else None,
+                    "min_runtime_seconds": round(min(successful), 6) if successful else None,
+                    "max_runtime_seconds": round(max(successful), 6) if successful else None,
+                    "mean_spike_count": round(statistics.mean(spike_counts), 2) if spike_counts else None,
+                    "errors": errors,
+                })
 
+    # Sort: failures last, then by runtime, then backend/scenario/size.
     records.sort(
         key=lambda item: (
             item["mean_runtime_seconds"] is None,
@@ -379,7 +443,7 @@ def aggregate_results(args: argparse.Namespace) -> dict:
         )
     )
 
-    highlights = build_highlights(records, support)
+    highlights = _build_highlights(records, support)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -405,10 +469,20 @@ def aggregate_results(args: argparse.Namespace) -> dict:
     }
 
 
-def build_highlights(records: list[dict], support: dict[str, dict]) -> dict:
+def _build_highlights(records: list[dict], support: dict[str, dict]) -> dict:
+    """Extract the fastest configurations from the result set.
+
+    Returns:
+        fastest_overall
+        fastest_per_neuron_count
+        fastest_per_backend
+        failed_configurations
+        unavailable_backends
+    """
     successful = [record for record in records if record["mean_runtime_seconds"] is not None]
     failures = [record for record in records if record["mean_runtime_seconds"] is None]
 
+    # --- Fastest overall ------------------------------------------------------
     fastest_overall = None
     if successful:
         fastest = min(successful, key=lambda item: item["mean_runtime_seconds"])
@@ -419,38 +493,37 @@ def build_highlights(records: list[dict], support: dict[str, dict]) -> dict:
             "mean_runtime_seconds": fastest["mean_runtime_seconds"],
         }
 
+    # --- Fastest at each neuron count -----------------------------------------
     fastest_per_neuron_count = []
     for neuron_count in sorted({record["neuron_count"] for record in successful}):
         subset = [record for record in successful if record["neuron_count"] == neuron_count]
         winner = min(subset, key=lambda item: item["mean_runtime_seconds"])
-        comparison = compare_against_next_fastest(subset, winner)
-        fastest_per_neuron_count.append(
-            {
-                "neuron_count": neuron_count,
-                "backend": winner["backend"],
-                "scenario": winner["scenario"],
-                "mean_runtime_seconds": winner["mean_runtime_seconds"],
-                "advantage_over_next_seconds": comparison["seconds"],
-                "advantage_over_next_percent": comparison["percent"],
-            }
-        )
+        comparison = _compare_against_next_fastest(subset, winner)
+        fastest_per_neuron_count.append({
+            "neuron_count": neuron_count,
+            "backend": winner["backend"],
+            "scenario": winner["scenario"],
+            "mean_runtime_seconds": winner["mean_runtime_seconds"],
+            "advantage_over_next_seconds": comparison["seconds"],
+            "advantage_over_next_percent": comparison["percent"],
+        })
 
+    # --- Best scenario per backend --------------------------------------------
     fastest_per_backend = []
     for backend in sorted({record["backend"] for record in successful}):
         subset = [record for record in successful if record["backend"] == backend]
         winner = min(subset, key=lambda item: item["mean_runtime_seconds"])
-        comparison = compare_against_next_fastest(subset, winner)
-        fastest_per_backend.append(
-            {
-                "backend": backend,
-                "scenario": winner["scenario"],
-                "neuron_count": winner["neuron_count"],
-                "mean_runtime_seconds": winner["mean_runtime_seconds"],
-                "advantage_over_next_seconds": comparison["seconds"],
-                "advantage_over_next_percent": comparison["percent"],
-            }
-        )
+        comparison = _compare_against_next_fastest(subset, winner)
+        fastest_per_backend.append({
+            "backend": backend,
+            "scenario": winner["scenario"],
+            "neuron_count": winner["neuron_count"],
+            "mean_runtime_seconds": winner["mean_runtime_seconds"],
+            "advantage_over_next_seconds": comparison["seconds"],
+            "advantage_over_next_percent": comparison["percent"],
+        })
 
+    # --- Backends that could not be used --------------------------------------
     unavailable_backends = [
         {"backend": backend, "reason": meta["reason"]}
         for backend, meta in support.items()
@@ -474,7 +547,11 @@ def build_highlights(records: list[dict], support: dict[str, dict]) -> dict:
     }
 
 
-def compare_against_next_fastest(records: list[dict], winner: dict) -> dict:
+def _compare_against_next_fastest(records: list[dict], winner: dict) -> dict:
+    """How much faster is the winner than the runner-up?
+
+    Returns {"seconds": ..., "percent": ...} or nulls if there is only one result.
+    """
     ranked = sorted(records, key=lambda item: item["mean_runtime_seconds"])
     if len(ranked) < 2:
         return {"seconds": None, "percent": None}
@@ -485,7 +562,13 @@ def compare_against_next_fastest(records: list[dict], winner: dict) -> dict:
     return {"seconds": delta_seconds, "percent": delta_percent}
 
 
+# =============================================================================
+#  Terminal report formatting
+# =============================================================================
+
+
 def format_terminal_report(payload: dict) -> str:
+    """Build the human-readable summary printed after a benchmark run."""
     lines = []
     simulation = payload["simulation"]
     highlights = payload["highlights"]
@@ -557,28 +640,26 @@ def format_terminal_report(payload: dict) -> str:
 
     lines.append("")
     lines.append("Results Table")
-    lines.extend(format_results_table(records))
+    lines.extend(_format_results_table(records))
     return "\n".join(lines)
 
 
-def format_results_table(records: list[dict]) -> list[str]:
+def _format_results_table(records: list[dict]) -> list[str]:
     headers = ["Backend", "Scenario", "Neurons", "Runs", "Mean (s)", "Min (s)", "Max (s)", "Spikes", "Status"]
     rows = []
     for record in records:
         status = "OK" if record["mean_runtime_seconds"] is not None else "FAILED"
-        rows.append(
-            [
-                record["backend"],
-                record["scenario"],
-                str(record["neuron_count"]),
-                str(record["successful_runs"]),
-                format_seconds(record["mean_runtime_seconds"]),
-                format_seconds(record["min_runtime_seconds"]),
-                format_seconds(record["max_runtime_seconds"]),
-                format_number(record["mean_spike_count"]),
-                status,
-            ]
-        )
+        rows.append([
+            record["backend"],
+            record["scenario"],
+            str(record["neuron_count"]),
+            str(record["successful_runs"]),
+            _format_seconds(record["mean_runtime_seconds"]),
+            _format_seconds(record["min_runtime_seconds"]),
+            _format_seconds(record["max_runtime_seconds"]),
+            _format_number(record["mean_spike_count"]),
+            status,
+        ])
 
     widths = [len(header) for header in headers]
     for row in rows:
@@ -596,11 +677,11 @@ def format_results_table(records: list[dict]) -> list[str]:
     return table
 
 
-def format_seconds(value: float | None) -> str:
+def _format_seconds(value: float | None) -> str:
     return f"{value:.6f}" if value is not None else "n/a"
 
 
-def format_number(value: float | None) -> str:
+def _format_number(value: float | None) -> str:
     if value is None:
         return "n/a"
     if float(value).is_integer():
@@ -613,9 +694,16 @@ def save_results(output_path: Path, payload: dict) -> None:
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+# =============================================================================
+#  Entry point
+# =============================================================================
+
+
 def main() -> int:
     args = parse_args()
 
+    # --single-run mode is meant to be called from a subprocess.
+    # It prints JSON on stdout for the parent to parse.
     if args.single_run:
         result = run_single_backend(
             backend=args.backend,

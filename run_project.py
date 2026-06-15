@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
-"""Serve a local Brian simulation studio with upload and script generation flows."""
+"""A local web server that turns a browser into a Brian2 control panel.
+
+Why this exists
+---------------
+Running Brian2 simulations usually means writing a Python script, running it,
+and inspecting the output separately.  This server wraps that workflow in a
+web UI so you can tune parameters, see the generated code, run it, and look
+at results — all without leaving the browser.
+
+What it serves
+--------------
+- Static files from the web/ directory (the front-end HTML, CSS, JS).
+- Three JSON API endpoints that the front-end calls:
+    GET  /api/info     → what Python/backends are available
+    POST /api/preview  → generate a CUBA script from form values (no run)
+    POST /api/run      → execute a simulation and return results
+
+The server is deliberately dependency-free — it uses only Python's built-in
+http.server module.
+"""
 
 from __future__ import annotations
 
@@ -37,8 +56,16 @@ def parse_args() -> argparse.Namespace:
 
 
 class AppHandler(SimpleHTTPRequestHandler):
+    """Handle HTTP requests, routing API calls to the simulation service.
+
+    Ordinary requests (HTML, JS, CSS) are handled by the parent class.
+    API requests are intercepted in do_GET and do_POST.
+    """
+
     def __init__(self, *args, directory: str | None = None, **kwargs):
         super().__init__(*args, directory=directory, **kwargs)
+
+    # -- GET -------------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/":
@@ -51,11 +78,15 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         super().do_GET()
 
+    # -- POST -------------------------------------------------------------------
+
     def do_POST(self) -> None:  # noqa: N802
+        # Only two endpoints accept POST.
         if self.path not in {"/api/run", "/api/preview"}:
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint.")
             return
 
+        # Read the JSON body.
         length = int(self.headers.get("Content-Length", "0"))
         payload_raw = self.rfile.read(length)
 
@@ -68,6 +99,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        # Dispatch to the appropriate handler.
         try:
             if self.path == "/api/preview":
                 result = preview_generated_script(payload.get("generate", {}))
@@ -86,10 +118,13 @@ class AppHandler(SimpleHTTPRequestHandler):
         status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
         self._send_json(status, result)
 
+    # -- Helpers ----------------------------------------------------------------
+
     def log_message(self, format: str, *args) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
 
     def end_headers(self) -> None:
+        """Tell the browser not to cache API responses."""
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")

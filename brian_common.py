@@ -1,11 +1,34 @@
-"""Shared Brian project helpers and CUBA model constants."""
+"""The shared constants and helpers that every other module reaches for.
 
-from __future__ import annotations
+This file exists so the server, the script generator, and the benchmark
+all agree on what a CUBA network looks like, what backends exist, and
+how to check if a backend will work on this machine.
 
+We keep everything in one place because these numbers and names define
+the model that everything else revolves around.
 
+The CUBA network
+----------------
+CUBA stands for "COBA with UDB" — it is the standard Brian2 example
+network. Excitatory and inhibitory neurons connect randomly and drive
+each other's conductances. The default values here come from that
+example.
+"""
+
+# --- What backends we know about ---------------------------------------------
+# These are the three execution engines Brian2 can target.
+# The web UI lets the user pick one, and the benchmark tests all of them.
 SUPPORTED_BACKENDS = ["numpy", "cpp_standalone", "cuda_standalone"]
+
+# --- What the web UI can do --------------------------------------------------
+# The front-end lets users either build a script from a form (generate)
+# or upload their own Python file (upload).
 SUPPORTED_MODES = ["upload", "generate"]
 
+# --- Default parameters for the CUBA network ---------------------------------
+# Every value here has a range that clamps user input so Brian2 does not
+# receive nonsense values. The defaults are the canonical CUBA example
+# numbers from the Brian2 documentation.
 CUBA_DEFAULTS = {
     "neurons": 4000,
     "duration_ms": 300,
@@ -24,12 +47,20 @@ CUBA_DEFAULTS = {
     "monitor_population": "all",
 }
 
+# --- The three equations that define a CUBA neuron ----------------------------
+# v   = membrane voltage
+# ge  = excitatory conductance  (driven by excitatory spikes)
+# gi  = inhibitory conductance  (driven by inhibitory spikes)
+# taum, taue, taui = time constants for each
 CUBA_EQUATIONS = """
 dv/dt  = (ge + gi - (v - el)) / taum : volt (unless refractory)
 dge/dt = -ge / taue : volt
 dgi/dt = -gi / taui : volt
 """.strip()
 
+# --- Benchmark scenarios ------------------------------------------------------
+# These are two ways to structure the same network. The benchmark runs both
+# to see if the network construction pattern affects performance.
 BENCHMARK_SCENARIOS = {
     "subgroups": {
         "label": "Single group with Subgroups",
@@ -43,6 +74,13 @@ BENCHMARK_SCENARIOS = {
 
 
 def check_backend_support(backend: str) -> tuple[bool, str | None]:
+    """Return (supported, reason) for a given backend name.
+
+    The numpy and cpp_standalone backends ship with Brian2 itself,
+    so they always work.  The cuda_standalone backend requires the
+    optional brian2cuda package — we try to import it and report
+    the error if it is missing.
+    """
     if backend in {"numpy", "cpp_standalone"}:
         return True, None
 
